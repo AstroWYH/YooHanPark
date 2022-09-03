@@ -9,26 +9,24 @@
         android:id="@+id/glSurfaceView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_gravity="top|center_horizontal"
-        />
+        android:layout_gravity="top|center_horizontal" />
 
     <Button
         android:id="@+id/switchBtn"
         android:layout_width="120dp"
         android:layout_height="50dp"
-        android:text="Switch"
-        android:layout_marginRight="80dp"
         android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginRight="80dp"
         android:layout_marginBottom="10dp"
-        />
+        android:text="Switch" />
+
     <Button
         android:id="@+id/takePicBtn"
         android:layout_width="120dp"
         android:layout_height="50dp"
-        android:text="TakePic"
-        android:layout_marginLeft="80dp"
         android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginLeft="80dp"
         android:layout_marginBottom="10dp"
-        />
+        android:text="TakePic" />
 
 </FrameLayout>
