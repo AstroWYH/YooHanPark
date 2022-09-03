@@ -71,14 +71,14 @@ public class CameraHelper {
 
         startThread();
 
-        String[] camera_id_list = new String[0]; // [YooHan] 创建长度为0的数组
+        String[] camera_id_list = new String[0];
         try {
-            camera_id_list = camera_manager_.getCameraIdList();  // [YooHan] 获取camera cam_id
+            camera_id_list = camera_manager_.getCameraIdList();
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
         if (camera_id_list.length == 0) {
-            ToastUtil.showMsg(context, "没有可用相机"); // [YooHan]
+            ToastUtil.showMsg(context, "没有可用相机");
             return;
         }
 
@@ -179,7 +179,6 @@ public class CameraHelper {
 
         int support_level = camera_characteristics_.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
         if (support_level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY) {
-            //Toast.makeText(context_, "相机硬件不支持新特性", Toast.LENGTH_SHORT).show();
             Log.e(TAG, "相机硬件不支持新特性");
         }
 

@@ -4,13 +4,13 @@ import android.content.Context;
 import android.widget.Toast;
 
 public class ToastUtil {
-    public static Toast mToast;
+    public static Toast toast_;
     public static void showMsg(Context context, String msg){
-        if ((mToast == null)){
-            mToast = Toast.makeText(context, TagUtil.YOOHAN + msg, Toast.LENGTH_LONG);
+        if ((toast_ == null)){
+            toast_ = Toast.makeText(context, TagUtil.YOOHAN + msg, Toast.LENGTH_LONG);
         }else {
-            mToast.setText(msg);
+            toast_.setText(msg);
         }
-        mToast.show();
+        toast_.show();
     }
 }
