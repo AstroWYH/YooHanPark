@@ -6,20 +6,34 @@ import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
+import android.hardware.camera2.CaptureFailure;
+import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.TotalCaptureResult;
+import android.media.Image;
+import android.media.ImageReader;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.Size;
+import android.view.Surface;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -28,9 +42,12 @@ import java.util.List;
 public class CameraHelper {
     private static final String TAG = TagUtil.YOOHAN + "[CameraHelper]";
     CameraManager camera_manager_;
+    CameraDevice camera_device_;
+    CameraCaptureSession camera_captureSession_;
     Context context_;
-    HandlerThread camera_thread;
+    HandlerThread camera_thread_;
     Handler camera_handler_;
+    ImageReader image_reader_;
     int camera_facing_ = CameraMetadata.LENS_FACING_FRONT;
     String camera_id_ = null;
     String front_camera_id_ = null;
@@ -39,6 +56,14 @@ public class CameraHelper {
     CameraCharacteristics back_camera_characteristics_ = null;
     private SurfaceTexture surface_texture_;
     int camera_sensor_orientation_ = 0;
+    Size preview_size_;
+    Size save_pic_size_;
+    public static final int PREVIEW_WIDTH = 1080;
+    public static final int PREVIEW_HEIGHT = 1920; // [YooHan] camera预览宽高
+    boolean can_exchange_camera_ = false;
+    boolean can_take_pic_ = false;
+    private volatile boolean is_swap_camera_ = false;
+    private OnCameraSwitchFinishListener on_camera_switch_finish_listener_;
 
     public CameraHelper(Context context) {
         camera_manager_ = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
@@ -53,7 +78,7 @@ public class CameraHelper {
             e.printStackTrace();
         }
         if (camera_id_list.length == 0) {
-            ToastUtil.heightowMsg(context, "没有可用相机"); // [YooHan]
+            ToastUtil.showMsg(context, "没有可用相机"); // [YooHan]
             return;
         }
 
@@ -66,11 +91,11 @@ public class CameraHelper {
                 if (lens_facing == CameraMetadata.LENS_FACING_FRONT && front_camera_id_ == null) {
                     front_camera_id_ = cam_id;
                     front_camera_characteristics_ = camera_characteristics;
-                    Log.e(TAG, "Front camera id:" + cam_id);
+                    Log.e(TAG, "front camera id:" + cam_id);
                 } else if (lens_facing == CameraMetadata.LENS_FACING_BACK && back_camera_id_ == null) {
                     back_camera_id_ = cam_id;
                     back_camera_characteristics_ = camera_characteristics;
-                    Log.e(TAG, "Back camera id:" + cam_id);
+                    Log.e(TAG, "back camera id:" + cam_id);
                 }
             } catch (CameraAccessException e) {
                 e.printStackTrace();
@@ -84,7 +109,7 @@ public class CameraHelper {
         }
     }
 
-    public void setSurfaceTexture(SurfaceTexture surface_texture){
+    public void setSurfaceTexture(SurfaceTexture surface_texture) {
         Log.e(TAG, "set surfaceTexture and create camera!");
         surface_texture_ = surface_texture;
         releaseCamera();
@@ -115,8 +140,8 @@ public class CameraHelper {
                 else
                     not_big_enough.add(size);
             }
-            Log.e(TAG, "系统支持的尺寸: " + size.getWidth() + " * "+ size.getHeight() +
-                    " 比例 ：" + size.getWidth() / (float)size.getHeight());
+            Log.e(TAG, "系统支持的尺寸: " + size.getWidth() + " * " + size.getHeight() +
+                    " 比例 ：" + size.getWidth() / (float) size.getHeight());
         }
 
         // 选择big_enough中最小的值，或not_big_enough中最大的值
@@ -135,64 +160,65 @@ public class CameraHelper {
         }
     }
 
-    public int getRotation(){
+    public int getRotation() {
         return camera_sensor_orientation_;
     }
 
     private void openCamera() {
-        if(surface_texture_ == null){
+        if (surface_texture_ == null) {
             return;
         }
-        CameraCharacteristics camera_characteristics_ = mFrontCameraCharacteristics;
-        if(frontCameraId == null || (camera_id_ != null && camera_id_.equals(backCameraId))){
-            camera_id_ = backCameraId;
-            camera_characteristics_ = mBackCameraCharacteristics;
+        CameraCharacteristics camera_characteristics_ = front_camera_characteristics_;
+        if (front_camera_id_ == null || (camera_id_ != null && camera_id_.equals(back_camera_id_))) {
+            camera_id_ = back_camera_id_;
+            camera_characteristics_ = back_camera_characteristics_;
         }
         if (camera_characteristics_ == null) {
             return;
         }
 
-        int supportLevel = camera_characteristics_.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
-        if (supportLevel == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY) {
-            //Toast.makeText(mContext, "相机硬件不支持新特性", Toast.LENGTH_SHORT).show();
-            Log.e(TAG,"相机硬件不支持新特性");
+        int support_level = camera_characteristics_.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
+        if (support_level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY) {
+            //Toast.makeText(context_, "相机硬件不支持新特性", Toast.LENGTH_SHORT).show();
+            Log.e(TAG, "相机硬件不支持新特性");
         }
 
         //获取摄像头方向
-        mCameraSensorOrientation = camera_characteristics_.get(CameraCharacteristics.SENSOR_ORIENTATION);
-        Log.e("Test","mCameraSensorOrientation:"+mCameraSensorOrientation);
-        android.hardware.camera2.params.StreamConfigurationMap configurationMap = camera_characteristics_.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        camera_sensor_orientation_ = camera_characteristics_.get(CameraCharacteristics.SENSOR_ORIENTATION);
+        Log.e(TAG, "sensor orientation:" + camera_sensor_orientation_);
+        android.hardware.camera2.params.StreamConfigurationMap configuration_map =
+                camera_characteristics_.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
 
-        Size[] savePicSize = configurationMap.getOutputSizes(ImageFormat.JPEG);          //保存照片尺寸
-        Size[] previewSize = configurationMap.getOutputSizes(SurfaceTexture.class); //预览尺寸
+        Size[] save_pic_size = configuration_map.getOutputSizes(ImageFormat.JPEG); // 保存照片尺寸
+        Size[] preview_size = configuration_map.getOutputSizes(SurfaceTexture.class); // 预览尺寸
 
-        DisplayMetrics displayMetrics = mContext.getResources().getDisplayMetrics();
-        int pw = PREVIEW_WIDTH;//displayMetrics.widthPixels;
-        int ph = PREVIEW_HEIGHT;//displayMetrics.heightPixels;
+        DisplayMetrics display_metrics = context_.getResources().getDisplayMetrics();
+        int width = PREVIEW_WIDTH; // display_metrics.widthPixels;
+        int height = PREVIEW_HEIGHT; // display_metrics.heightPixels;
 
-        if (mCameraSensorOrientation == 90 || mCameraSensorOrientation == 270) {
-            pw = PREVIEW_HEIGHT;//displayMetrics.heightPixels;
-            ph = PREVIEW_WIDTH;//displayMetrics.widthPixels;
+        if (camera_sensor_orientation_ == 90 || camera_sensor_orientation_ == 270) {
+            width = PREVIEW_HEIGHT; // display_metrics.heightPixels;
+            height = PREVIEW_WIDTH; // display_metrics.widthPixels;
         }
 
-        mPreviewSize = getBestSize(pw, ph, pw, ph, List.of(previewSize));
-        Log.e("Test", "屏幕尺寸 ："+displayMetrics.widthPixels + " * " + displayMetrics.heightPixels);
-        Log.e("Test", "预览最优尺寸 ："+mPreviewSize.getWidth() + " * " + mPreviewSize.getHeight());
-        Log.e("Test","----------------------------------------------------");
-        mSavePicSize = getBestSize(pw, ph, pw, ph, List.of(savePicSize));
-        Log.e("Test", "保存图片最优尺寸 ："+mSavePicSize.getWidth() + " * " + mSavePicSize.getHeight());
-
+        preview_size_ = getBestSize(width, height, width, height, List.of(preview_size));
+        Log.e(TAG, "屏幕尺寸 ：" + display_metrics.widthPixels + " * " + display_metrics.heightPixels);
+        Log.e(TAG, "预览最优尺寸 ：" + preview_size_.getWidth() + " * " + preview_size_.getHeight());
+        Log.e(TAG, "----------------------------------------------------");
+        save_pic_size_ = getBestSize(width, height, width, height, List.of(save_pic_size));
+        Log.e(TAG, "保存图片最优尺寸 ：" + save_pic_size_.getWidth() + " * " +
+                save_pic_size_.getHeight());
 
         try {
-            if (ActivityCompat.checkSelfPermission(mContext, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                mCameraManager.openCamera(camera_id_, new CameraDevice.StateCallback() {
+            if (ActivityCompat.checkSelfPermission(context_, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                camera_manager_.openCamera(camera_id_, new CameraDevice.StateCallback() {
                     @Override
                     public void onOpened(@NonNull CameraDevice camera) {
                         Log.e(TAG, "openCamera onOpened :");
-                        mCameraDevice = camera;
+                        camera_device_ = camera;
                         try {
                             startPreview();
-                        }catch (Exception e){
+                        } catch (Exception e) {
                             e.printStackTrace();
                         }
                     }
@@ -201,15 +227,15 @@ public class CameraHelper {
                     public void onDisconnected(@NonNull CameraDevice camera) {
                         Log.e(TAG, "openCamera onDisconnected :");
                         camera.close();
-                        mCameraDevice = null;
+                        camera_device_ = null;
                     }
 
                     @Override
                     public void onError(@NonNull CameraDevice camera, int error) {
-                        Log.e(TAG, "openCamera onError :"+error);
+                        Log.e(TAG, "openCamera onError :" + error);
                         camera.close();
-                        mCameraDevice = null;
-                        Toast.makeText(mContext, "打开相机失败！", Toast.LENGTH_SHORT).show();
+                        camera_device_ = null;
+                        Toast.makeText(context_, "打开相机失败！", Toast.LENGTH_SHORT).show();
                     }
 
                     @Override
@@ -217,18 +243,257 @@ public class CameraHelper {
                         super.onClosed(camera);
                         Log.e(TAG, "openCamera onClosed !");
                     }
-                }, mCameraHandler);
+                }, camera_handler_);
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    public void startThread() {
-        if (camera_thread == null) {
-            camera_thread = new HandlerThread("CameraThread");
-            camera_thread.start();
-            camera_handler_ = new Handler(camera_thread.getLooper());
+    /**
+     * 拍照
+     */
+    public void takePic() {
+        if (surface_texture_ == null) {
+            return;
         }
+        try {
+            ImageReader reader = ImageReader.newInstance(save_pic_size_.getWidth(), save_pic_size_.getHeight(), ImageFormat.JPEG, 1);
+            List<Surface> output_surfaces = new ArrayList<Surface>(2);
+            output_surfaces.add(reader.getSurface());
+            output_surfaces.add(new Surface(surface_texture_));
+
+            final CaptureRequest.Builder capture_builder = camera_device_.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            capture_builder.addTarget(reader.getSurface());
+            capture_builder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
+
+            // Orientation
+            // int rotation = getWindowManager().getDefaultDisplay().getRotation();
+            // capture_builder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
+
+            File path_file = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Test");
+            if (!path_file.exists()) {
+                try {
+                    path_file.mkdirs();
+                    Log.e(TAG, "take picture create crate dir :" + path_file.getAbsolutePath());
+                } catch (Exception e) {
+                    Log.e(TAG, "take picture create dir error:" + e.toString());
+                }
+            }
+
+            final File file = new File(path_file, "TestCamera.jpg");
+
+            ImageReader.OnImageAvailableListener reader_listener = new ImageReader.OnImageAvailableListener() {
+
+                @Override
+                public void onImageAvailable(ImageReader reader) {
+
+                    Image image = null;
+                    try {
+                        image = reader.acquireLatestImage();
+                        ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+                        byte[] bytes = new byte[buffer.capacity()];
+                        buffer.get(bytes);
+                        save(bytes);
+                    } catch (FileNotFoundException e) {
+                        e.printStackTrace();
+                        Log.e(TAG, "take picture error 1:" + e.toString());
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        Log.e(TAG, "take picture error 2:" + e.toString());
+                    } finally {
+                        if (image != null) {
+                            image.close();
+                        }
+                    }
+                }
+
+                private void save(byte[] bytes) throws IOException {
+                    OutputStream output = null;
+                    try {
+                        if (!file.exists()) {
+                            file.createNewFile();
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Save picture " + file.getAbsolutePath() + " error:" + e.toString());
+                    }
+                    try {
+                        output = new FileOutputStream(file);
+                        output.write(bytes);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Save picture error:" + e.toString());
+                    } finally {
+                        if (null != output) {
+                            output.close();
+                        }
+                    }
+                }
+
+            };
+
+            HandlerThread thread = new HandlerThread("CameraPicture");
+            thread.start();
+            final Handler backgroud_handler = new Handler(thread.getLooper());
+            reader.setOnImageAvailableListener(reader_listener, backgroud_handler);
+
+            final CameraCaptureSession.CaptureCallback captureListener = new CameraCaptureSession.CaptureCallback() {
+                @Override
+                public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
+                    super.onCaptureCompleted(session, request, result);
+                    Log.e(TAG, "Saved:" + file);
+                    Toast.makeText(context_, "Saved:" + file, Toast.LENGTH_SHORT).show();
+                    startPreview();
+                }
+            };
+
+            camera_device_.createCaptureSession(output_surfaces, new CameraCaptureSession.StateCallback() {
+
+                @Override
+                public void onConfigured(CameraCaptureSession session) {
+                    try {
+                        session.capture(capture_builder.build(), captureListener, backgroud_handler);
+                    } catch (CameraAccessException e) {
+                        e.printStackTrace();
+                    }
+                }
+
+                @Override
+                public void onConfigureFailed(CameraCaptureSession session) {
+
+                }
+            }, backgroud_handler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    protected void startPreview() {
+        if (null == camera_device_ || surface_texture_ == null || null == preview_size_) {
+            Log.e(TAG, "startPreview fail, return");
+            return;
+        }
+        surface_texture_.setDefaultBufferSize(preview_size_.getWidth(), preview_size_.getHeight());
+
+        // 为相机预览，创建一个CameraCaptureSession对象
+        Surface surface = new Surface(surface_texture_);
+        CameraCaptureSession.StateCallback callback = new CameraCaptureSession.StateCallback() {
+            @Override
+            public void onConfigured(@NonNull CameraCaptureSession session) {
+                Log.e(TAG, "createCaptureSession onConfigured");
+                camera_captureSession_ = session;
+                try {
+                    CaptureRequest.Builder capture_request_builder = camera_device_.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                    capture_request_builder.addTarget(surface);  // 将CaptureRequest的构建器与Surface对象绑定在一起
+                    capture_request_builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);     // 闪光灯
+                    capture_request_builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE); // 自动对焦
+
+                    session.setRepeatingRequest(capture_request_builder.build(), new CameraCaptureSession.CaptureCallback() {
+                        @Override
+                        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+                            super.onCaptureCompleted(session, request, result);
+                            can_exchange_camera_ = true;
+                            can_take_pic_ = true;
+
+                            if (is_swap_camera_) {
+                                is_swap_camera_ = false;
+                                if (on_camera_switch_finish_listener_ != null) {
+                                    on_camera_switch_finish_listener_.onCameraSwitchFinish();
+                                }
+                            }
+                        }
+
+                        @Override
+                        public void onCaptureFailed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureFailure failure) {
+                            super.onCaptureFailed(session, request, failure);
+                            Log.e(TAG, "onCaptureFailed :" + failure.toString());
+                            can_take_pic_ = false;
+                            Toast.makeText(context_, "CameraCaptureSession onCaptureFailed", Toast.LENGTH_SHORT).show();
+                        }
+                    }, camera_handler_);
+                } catch (CameraAccessException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            @Override
+            public void onConfigureFailed(@NonNull CameraCaptureSession session) {
+                Log.e(TAG, "createCaptureSession onConfigureFailed!");
+                Toast.makeText(context_, "开启预览会话失败！", Toast.LENGTH_SHORT).show();
+            }
+        };
+
+        try {
+            camera_device_.createCaptureSession(List.of(surface), callback, camera_handler_);
+        } catch (Exception e) {
+            Log.e(TAG, "camera device createCaptureSession error:" + e.toString());
+        }
+    }
+
+
+    public interface OnCameraSwitchFinishListener {
+        void onCameraSwitchFinish();
+    }
+
+    public void setOnCameraSwitchFinishListener(OnCameraSwitchFinishListener listener) {
+        this.on_camera_switch_finish_listener_ = listener;
+    }
+
+    /**
+     * 切换摄像头
+     */
+
+    public void exchangeCamera() {
+        is_swap_camera_ = true;
+        // if (camera_device_ == null || !can_exchange_camera_) return;
+        if (camera_facing_ == CameraCharacteristics.LENS_FACING_FRONT && front_camera_id_ != null) {
+            camera_facing_ = CameraCharacteristics.LENS_FACING_BACK;
+            camera_id_ = back_camera_id_;
+        } else if (back_camera_id_ != null) {
+            camera_facing_ = CameraCharacteristics.LENS_FACING_FRONT;
+            camera_id_ = front_camera_id_;
+        } else {
+            camera_facing_ = CameraCharacteristics.LENS_FACING_FRONT;
+            camera_id_ = front_camera_id_;
+        }
+        releaseCamera();
+        openCamera();
+    }
+
+    public void releaseCamera() {
+        if (camera_captureSession_ != null) {
+            camera_captureSession_.close();
+        }
+        camera_captureSession_ = null;
+
+        if (camera_device_ != null) {
+            camera_device_.close();
+        }
+        camera_device_ = null;
+
+        if (image_reader_ != null) {
+            image_reader_.close();
+        }
+        image_reader_ = null;
+
+        can_exchange_camera_ = false;
+    }
+
+    public void startThread() {
+        if (camera_thread_ == null) {
+            camera_thread_ = new HandlerThread("CameraThread");
+            camera_thread_.start();
+            camera_handler_ = new Handler(camera_thread_.getLooper());
+        }
+    }
+
+    public void releaseThread() {
+        if (camera_thread_ != null) {
+            try {
+                camera_thread_.quitSafely();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        camera_thread_ = null;
     }
 }

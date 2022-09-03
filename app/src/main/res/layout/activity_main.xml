@@ -30,4 +30,10 @@
         android:layout_alignParentBottom="true"
         android:layout_alignParentRight="true" />
 
+    <android.opengl.GLSurfaceView
+        android:id="@+id/glSurfaceView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="top|center_horizontal" />
+
 </RelativeLayout>
