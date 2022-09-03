@@ -47,7 +47,6 @@ public class CameraHelper {
     Context context_;
     HandlerThread camera_thread_;
     Handler camera_handler_;
-    ImageReader image_reader_;
     int camera_facing_ = CameraMetadata.LENS_FACING_FRONT;
     String camera_id_ = null;
     String front_camera_id_ = null;
@@ -164,6 +163,9 @@ public class CameraHelper {
         return camera_sensor_orientation_;
     }
 
+    /**
+     * openCamera
+     */
     private void openCamera() {
         if (surface_texture_ == null) {
             return;
@@ -182,7 +184,7 @@ public class CameraHelper {
             Log.e(TAG, "相机硬件不支持新特性");
         }
 
-        //获取摄像头方向
+        // 获取摄像头方向
         camera_sensor_orientation_ = camera_characteristics_.get(CameraCharacteristics.SENSOR_ORIENTATION);
         Log.e(TAG, "sensor orientation:" + camera_sensor_orientation_);
         android.hardware.camera2.params.StreamConfigurationMap configuration_map =
@@ -209,11 +211,12 @@ public class CameraHelper {
                 save_pic_size_.getHeight());
 
         try {
-            if (ActivityCompat.checkSelfPermission(context_, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            if (ActivityCompat.checkSelfPermission(context_, Manifest.permission.CAMERA) ==
+                    PackageManager.PERMISSION_GRANTED) {
                 camera_manager_.openCamera(camera_id_, new CameraDevice.StateCallback() {
                     @Override
                     public void onOpened(@NonNull CameraDevice camera) {
-                        Log.e(TAG, "openCamera onOpened :");
+                        Log.e(TAG, "openCamera onOpened");
                         camera_device_ = camera;
                         try {
                             startPreview();
@@ -257,20 +260,19 @@ public class CameraHelper {
             return;
         }
         try {
-            ImageReader reader = ImageReader.newInstance(save_pic_size_.getWidth(), save_pic_size_.getHeight(), ImageFormat.JPEG, 1);
+            ImageReader reader = ImageReader.newInstance(save_pic_size_.getWidth(),
+                    save_pic_size_.getHeight(), ImageFormat.JPEG, 1);
             List<Surface> output_surfaces = new ArrayList<Surface>(2);
             output_surfaces.add(reader.getSurface());
             output_surfaces.add(new Surface(surface_texture_));
 
-            final CaptureRequest.Builder capture_builder = camera_device_.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            final CaptureRequest.Builder capture_builder = camera_device_.createCaptureRequest(
+                    CameraDevice.TEMPLATE_STILL_CAPTURE);
             capture_builder.addTarget(reader.getSurface());
             capture_builder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
 
-            // Orientation
-            // int rotation = getWindowManager().getDefaultDisplay().getRotation();
-            // capture_builder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
-
-            File path_file = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Test");
+            File path_file = new File(Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DCIM), "YooHanPics");
             if (!path_file.exists()) {
                 try {
                     path_file.mkdirs();
@@ -280,13 +282,12 @@ public class CameraHelper {
                 }
             }
 
-            final File file = new File(path_file, "TestCamera.jpg");
+            final File file = new File(path_file, "YooHan.jpg");
 
-            ImageReader.OnImageAvailableListener reader_listener = new ImageReader.OnImageAvailableListener() {
-
+            ImageReader.OnImageAvailableListener reader_listener =
+                    new ImageReader.OnImageAvailableListener() {
                 @Override
                 public void onImageAvailable(ImageReader reader) {
-
                     Image image = null;
                     try {
                         image = reader.acquireLatestImage();
@@ -335,9 +336,11 @@ public class CameraHelper {
             final Handler backgroud_handler = new Handler(thread.getLooper());
             reader.setOnImageAvailableListener(reader_listener, backgroud_handler);
 
-            final CameraCaptureSession.CaptureCallback captureListener = new CameraCaptureSession.CaptureCallback() {
+            final CameraCaptureSession.CaptureCallback capture_listener =
+                    new CameraCaptureSession.CaptureCallback() {
                 @Override
-                public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
+                public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request,
+                                               TotalCaptureResult result) {
                     super.onCaptureCompleted(session, request, result);
                     Log.e(TAG, "Saved:" + file);
                     Toast.makeText(context_, "Saved:" + file, Toast.LENGTH_SHORT).show();
@@ -345,12 +348,12 @@ public class CameraHelper {
                 }
             };
 
-            camera_device_.createCaptureSession(output_surfaces, new CameraCaptureSession.StateCallback() {
-
+            camera_device_.createCaptureSession(output_surfaces,
+                    new CameraCaptureSession.StateCallback() {
                 @Override
                 public void onConfigured(CameraCaptureSession session) {
                     try {
-                        session.capture(capture_builder.build(), captureListener, backgroud_handler);
+                        session.capture(capture_builder.build(), capture_listener, backgroud_handler);
                     } catch (CameraAccessException e) {
                         e.printStackTrace();
                     }
@@ -381,8 +384,9 @@ public class CameraHelper {
                 Log.e(TAG, "createCaptureSession onConfigured");
                 camera_captureSession_ = session;
                 try {
-                    CaptureRequest.Builder capture_request_builder = camera_device_.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-                    capture_request_builder.addTarget(surface);  // 将CaptureRequest的构建器与Surface对象绑定在一起
+                    CaptureRequest.Builder capture_request_builder =
+                            camera_device_.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                    capture_request_builder.addTarget(surface); // 将CaptureRequest的构建器与Surface对象绑定在一起
                     capture_request_builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);     // 闪光灯
                     capture_request_builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE); // 自动对焦
 
@@ -443,7 +447,6 @@ public class CameraHelper {
 
     public void exchangeCamera() {
         is_swap_camera_ = true;
-        // if (camera_device_ == null || !can_exchange_camera_) return;
         if (camera_facing_ == CameraCharacteristics.LENS_FACING_FRONT && front_camera_id_ != null) {
             camera_facing_ = CameraCharacteristics.LENS_FACING_BACK;
             camera_id_ = back_camera_id_;
@@ -468,12 +471,6 @@ public class CameraHelper {
             camera_device_.close();
         }
         camera_device_ = null;
-
-        if (image_reader_ != null) {
-            image_reader_.close();
-        }
-        image_reader_ = null;
-
         can_exchange_camera_ = false;
     }
 
